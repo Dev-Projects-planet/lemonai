@@ -10,6 +10,11 @@ const builtins = [
 const external = [...builtins, ...Object.keys(pkg.dependencies || {})];
 
 export default defineConfig({
+  server: {
+    host: '0.0.0.0',
+    port: 5005,
+    allowedHosts: ['lemonai.devcloudplanet.com']
+  },
   root: '.',
   build: {
     outDir: '.vite',   // 指定构建目录为 .vite
