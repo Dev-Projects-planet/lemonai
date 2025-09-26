@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: Docker Build and Push
 
 on:
   push:
@@ -6,14 +6,10 @@ on:
       - main
 
 jobs:
-  build-and-push-runtime:
+  build-and-push:
     runs-on: ubuntu-latest
-    env:
-      REGISTRY: ghcr.io
-      IMAGE_NAME: ghcr.io/dev-projects-planet/lemonai-runtime
-      DOCKERFILE: containers/runtime/Dockerfile
-      VERSION_FILE: containers/runtime/VERSION
-      PLATFORMS: linux/amd64,linux/arm64
+    timeout-minutes: 60
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,80 +20,66 @@ jobs:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.GH_USER }}
-          password: ${{ secrets.GH_TOKEN }}
-
-      - name: Read runtime version
-        id: get_runtime_version
-        run: |
-          VERSION=$(cat ${{ env.VERSION_FILE }} | tr -d '\n' | tr -d '\r' | xargs)
-          echo "RUNTIME_VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Detected runtime version: $VERSION"
-
-      - name: Build and push runtime image
-        run: |
-          RUNTIME_TAG=${{ steps.get_runtime_version.outputs.RUNTIME_VERSION }}
-          if [ -z "$RUNTIME_TAG" ]; then
-            echo "Error: Could not read runtime version from file. Exiting."
-            exit 1
-          fi
-          
-          RUNTIME_VERSION_TAG=${{ env.IMAGE_NAME }}:$RUNTIME_TAG
-          RUNTIME_LATEST_TAG=${{ env.IMAGE_NAME }}:latest
-
-          echo "Building and pushing $RUNTIME_VERSION_TAG, $RUNTIME_LATEST_TAG for platforms [${{ env.PLATFORMS }}]"
-          docker buildx build \
-            --platform ${{ env.PLATFORMS }} \
-            --tag $RUNTIME_VERSION_TAG \
-            --tag $RUNTIME_LATEST_TAG \
-            -f ${{ env.DOCKERFILE }} \
-            --push .
-
-  build-and-push-app:
-    runs-on: ubuntu-latest
-    env:
-      REGISTRY: ghcr.io
-      APP_IMAGE_NAME: ghcr.io/dev-projects-planet/lemonai
-      APP_DOCKERFILE: containers/app/Dockerfile
-      APP_VERSION_FILE: containers/app/VERSION
-      PLATFORMS: linux/amd64,linux/arm64
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ secrets.GH_USER }}
           password: ${{ secrets.GH_TOKEN }}
 
       - name: Read app version
-        id: get_app_version
+        id: app_version
         run: |
-          VERSION=$(cat ${{ env.APP_VERSION_FILE }} | tr -d '\n' | tr -d '\r' | xargs)
-          echo "APP_VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Detected app version: $VERSION"
+          VERSION=$(cat containers/app/VERSION | tr -d '\n' | tr -d '\r' | xargs)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "App version: $VERSION"
 
       - name: Build and push app image
+        timeout-minutes: 25
         run: |
-          APP_TAG=${{ steps.get_app_version.outputs.APP_VERSION }}
-          if [ -z "$APP_TAG" ]; then
-            echo "Error: Could not read app version from file. Exiting."
-            exit 1
-          fi
+          APP_VERSION="${{ steps.app_version.outputs.version }}"
           
-          APP_VERSION_TAG=${{ env.APP_IMAGE_NAME }}:$APP_TAG
-          APP_LATEST_TAG=${{ env.APP_IMAGE_NAME }}:latest
-
-          echo "Building and pushing $APP_VERSION_TAG, $APP_LATEST_TAG for platforms [${{ env.PLATFORMS }}]"
+          echo "Building LemonAI app image..."
+          echo "Version: $APP_VERSION"
+          echo "Platform: linux/amd64"
+          echo "Started at: $(date)"
+          
           docker buildx build \
-            --platform ${{ env.PLATFORMS }} \
-            --tag $APP_VERSION_TAG \
-            --tag $APP_LATEST_TAG \
-            -f ${{ env.APP_DOCKERFILE }} \
+            --platform linux/amd64 \
+            --tag ghcr.io/dev-projects-planet/lemonai:$APP_VERSION \
+            --tag ghcr.io/dev-projects-planet/lemonai:latest \
+            -f containers/app/Dockerfile \
+            --progress=plain \
             --push .
+          
+          echo "App build completed at: $(date)"
+
+      - name: Read runtime version
+        id: runtime_version
+        run: |
+          VERSION=$(cat containers/runtime/VERSION | tr -d '\n' | tr -d '\r' | xargs)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Runtime version: $VERSION"
+
+      - name: Build and push runtime image
+        timeout-minutes: 30
+        run: |
+          RUNTIME_VERSION="${{ steps.runtime_version.outputs.version }}"
+          
+          echo "Building LemonAI runtime sandbox image..."
+          echo "Version: $RUNTIME_VERSION"
+          echo "Platform: linux/amd64"
+          echo "Started at: $(date)"
+          
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag ghcr.io/dev-projects-planet/lemonai-runtime:$RUNTIME_VERSION \
+            --tag ghcr.io/dev-projects-planet/lemonai-runtime:latest \
+            -f containers/runtime/Dockerfile \
+            --progress=plain \
+            --push .
+          
+          echo "Runtime build completed at: $(date)"
+
+      - name: Summary
+        run: |
+          echo "✅ Build completed successfully!"
+          echo "📦 App image: ghcr.io/dev-projects-planet/lemonai:${{ steps.app_version.outputs.version }}"
+          echo "🏃 Runtime image: ghcr.io/dev-projects-planet/lemonai-runtime:${{ steps.runtime_version.outputs.version }}"
